@@ -213,3 +213,42 @@ CREATE TABLE IF NOT EXISTS schm_sp.service_filter_output_data
 
 ALTER TABLE schm_sp.user_sentbox
     ALTER COLUMN action_on_date TYPE date;
+
+
+-------------------- 14/09/2026---------------------
+
+
+-- Table: schm_sp.applicant_inbox
+
+-- DROP TABLE IF EXISTS schm_sp.applicant_inbox;
+
+CREATE TABLE IF NOT EXISTS schm_sp.applicant_inbox
+(
+    id bigserial,
+    application_id character varying COLLATE pg_catalog."default" NOT NULL,
+    application_ref_no character varying COLLATE pg_catalog."default",
+    service_id integer,
+    base_service_id integer,
+    service_name character varying COLLATE pg_catalog."default",
+    form_id character varying COLLATE pg_catalog."default",
+    task_id character varying COLLATE pg_catalog."default" NOT NULL,
+    task_name character varying COLLATE pg_catalog."default",
+    current_process_id character varying COLLATE pg_catalog."default" NOT NULL,
+    tenant_id character varying COLLATE pg_catalog."default",
+    applied_by bigint,
+    beneficiary_name character varying COLLATE pg_catalog."default",
+    submission_to_same_official boolean NOT NULL DEFAULT false,
+    requires_payment boolean NOT NULL DEFAULT false,
+    requires_form boolean NOT NULL DEFAULT false,
+    status character varying COLLATE pg_catalog."default",
+    apply_date timestamp with time zone,
+    cr_date timestamp with time zone,
+    up_date timestamp with time zone,
+    CONSTRAINT applicant_inbox_pkey PRIMARY KEY (id),
+    CONSTRAINT applicant_inbox_current_process_id_key UNIQUE (current_process_id)
+)
+
+TABLESPACE pg_default;
+
+ALTER TABLE IF EXISTS schm_sp.applicant_inbox
+    OWNER to postgres;

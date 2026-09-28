@@ -116,6 +116,13 @@ public class UserSentBoxService {
 		return (root, query, cb) -> {
 			List<Predicate> predicates = new ArrayList<>();
 
+			predicates.add(
+					cb.or(
+							cb.isFalse(root.get("calledback")),
+							cb.isNull(root.get("calledback"))
+					)
+			);
+
 			if (filteredApplicationIds != null) {
 				predicates.add(root.get("applId").in(filteredApplicationIds));
 			}
@@ -171,6 +178,13 @@ public class UserSentBoxService {
 
 			List<Predicate> predicates = new ArrayList<>();
 
+			predicates.add(
+					cb.or(
+							cb.isFalse(root.get("calledback")),
+							cb.isNull(root.get("calledback"))
+					)
+			);
+
 			predicates.add(cb.equal(root.get("tenantId"), tenantId));
 			predicates.add(root.get("holderId").in(holderIds));
 
@@ -206,6 +220,7 @@ public class UserSentBoxService {
 		dto.setTaskId(entity.getTaskId());
 		dto.setTaskName(entity.getTaskName());
 		dto.setActionOn(entity.getActionOn());
+		dto.setCurrentProcessId(entity.getProcessId());
 
 		return dto;
 	}

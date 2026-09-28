@@ -1,16 +1,24 @@
 package com.serviceplus.tracking.service;
 
+import com.serviceplus.tracking.ExceptionHandler.SPRuntimeError;
 import com.serviceplus.tracking.dto.*;
+import com.serviceplus.tracking.entity.ApplicantInbox;
 import com.serviceplus.tracking.entity.ApplicationTracking;
 import com.serviceplus.tracking.entity.ApplicationTrackingHolder;
+import com.serviceplus.tracking.entity.UserInbox;
 import com.serviceplus.tracking.feignClient.InstanceConfigRegistryFeignClient;
-import com.serviceplus.tracking.repository.ApplicationTrackingDocumentRepository;
-import com.serviceplus.tracking.repository.ApplicationTrackingHolderRepository;
-import com.serviceplus.tracking.repository.ApplicationTrackingRepository;
-import com.serviceplus.tracking.repository.ApplicationTrackingRepositoryCustomImpl;
+import com.serviceplus.tracking.repository.*;
+import com.serviceplus.tracking.repository.specification.ApplicantInboxSpecification;
+import com.serviceplus.tracking.repository.specification.ApplicationTrackingSpecification;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
@@ -18,12 +26,13 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static com.serviceplus.tracking.utility.ApplicationConstants.APPLICATION_SUBMISSION_TASK_NAME;
-import static com.serviceplus.tracking.utility.ApplicationConstants.CLIENT_DOMAIN_HEADER;
+import static com.serviceplus.tracking.utility.ApplicationConstants.*;
 import static com.serviceplus.tracking.utility.CommonUtil.getUserSessionDetails;
 import static com.serviceplus.tracking.utility.CommonUtil.isEmpty;
+import static java.util.Objects.isNull;
 
 @Service
 public class ApplicationTrackingService {
@@ -42,13 +51,16 @@ public class ApplicationTrackingService {
 
     private final ApplicationTrackingDocumentRepository applicationTrackingDocumentRepository;
 
-    public ApplicationTrackingService(ApplicationTrackingRepository trackingRepository, WorkflowInboxRedisService workflowInboxRedisService, ApplicationTrackingRepositoryCustomImpl applicationTrackingRepositoryCustom, InstanceConfigRegistryFeignClient instanceConfigRegistryFeignClient, ApplicationTrackingHolderRepository applicationTrackingHolderRepository, ApplicationTrackingDocumentRepository applicationTrackingDocumentRepository) {
+    private final ApplicantInboxRepository applicantInboxRepository;
+
+    public ApplicationTrackingService(ApplicationTrackingRepository trackingRepository, WorkflowInboxRedisService workflowInboxRedisService, ApplicationTrackingRepositoryCustomImpl applicationTrackingRepositoryCustom, InstanceConfigRegistryFeignClient instanceConfigRegistryFeignClient, ApplicationTrackingHolderRepository applicationTrackingHolderRepository, ApplicationTrackingDocumentRepository applicationTrackingDocumentRepository, ApplicantInboxRepository applicantInboxRepository) {
         this.trackingRepository = trackingRepository;
         this.workflowInboxRedisService = workflowInboxRedisService;
         this.applicationTrackingRepositoryCustom = applicationTrackingRepositoryCustom;
         this.instanceConfigRegistryFeignClient = instanceConfigRegistryFeignClient;
         this.applicationTrackingHolderRepository = applicationTrackingHolderRepository;
         this.applicationTrackingDocumentRepository = applicationTrackingDocumentRepository;
+        this.applicantInboxRepository = applicantInboxRepository;
     }
 
     public ApplicationTrackingResponse getTracking(ApplicationTrackingRequest requestDTO, HttpServletRequest request) {
@@ -58,8 +70,8 @@ public class ApplicationTrackingService {
         logger.info("Tracking request received. userId={}, applId={}, applRefNo={}", session.getUserID(), requestDTO.getApplId(), requestDTO.getApplRefNo());
 
         Set<Object> holderIds = workflowInboxRedisService.getTokensByUserAndLocation(
-                                session.getUserID(),
-                                String.valueOf(session.getLocationId()));
+                session.getUserID(),
+                String.valueOf(session.getLocationId()));
 
         boolean officialUser = holderIds != null && !holderIds.isEmpty();
 
@@ -70,10 +82,10 @@ public class ApplicationTrackingService {
             logger.info("Official flow detected. holderCount={}", holderIds.size());
             Set<String> holderIdStrings = holderIds.stream().map(String::valueOf).collect(Collectors.toSet());
 
-            List<ApplicationTrackingHolder> holderMappings =applicationTrackingHolderRepository
-                                                            .findByHolderIdInAndTenantId(
-                                                                    holderIdStrings,
-                                                                    session.getTenantId());
+            List<ApplicationTrackingHolder> holderMappings = applicationTrackingHolderRepository
+                    .findByHolderIdInAndTenantId(
+                            holderIdStrings,
+                            session.getTenantId());
 
             officialProcessIds = holderMappings.stream().map(ApplicationTrackingHolder::getProcessId).collect(Collectors.toSet());
 
@@ -89,16 +101,16 @@ public class ApplicationTrackingService {
         if (!isEmpty(requestDTO.getApplId())) {
 
             trackingList = trackingRepository
-                            .findByApplIdAndTenantIdOrderByProcessIdAsc(
-                                    requestDTO.getApplId(),
-                                    session.getTenantId());
+                    .findByApplIdAndTenantIdOrderByProcessIdAsc(
+                            requestDTO.getApplId(),
+                            session.getTenantId());
 
         } else {
 
             trackingList = trackingRepository
-                            .findByApplRefNoAndTenantIdOrderByProcessIdAsc(
-                                    requestDTO.getApplRefNo(),
-                                    session.getTenantId());
+                    .findByApplRefNoAndTenantIdOrderByProcessIdAsc(
+                            requestDTO.getApplRefNo(),
+                            session.getTenantId());
         }
 
         logger.info("Tracking records fetched count={}", trackingList.size());
@@ -107,7 +119,7 @@ public class ApplicationTrackingService {
             return new ApplicationTrackingResponse();
         }
 
-        return convertToDTO(trackingList, officialUser, session.getUserID(), officialProcessIds,holderIds);
+        return convertToDTO(trackingList, officialUser, session.getUserID(), officialProcessIds, holderIds);
     }
 
     private ApplicationTrackingResponse convertToDTO(List<ApplicationTracking> trackingList, boolean officialUser, Long sessionUserId, Set<String> officialProcessIds, Set<Object> holderIds) {
@@ -140,9 +152,9 @@ public class ApplicationTrackingService {
         List<ApplicationTrackingResponse.TrackingDetailDTO> result = new ArrayList<>();
 
         boolean applicantAccess = trackingList.stream()
-                                              .anyMatch(tracking ->
-                                                      tracking.getAppliedUserId() != null && tracking.getAppliedUserId().equals(sessionUserId)
-                                              );
+                .anyMatch(tracking ->
+                        tracking.getAppliedUserId() != null && tracking.getAppliedUserId().equals(sessionUserId)
+                );
 
         for (ApplicationTracking tracking : trackingList) {
 
@@ -228,6 +240,10 @@ public class ApplicationTrackingService {
 
     public ApplicationTrackingResponse trackPublicApplication(PublicApplicationTrackingRequest requestDTO, HttpServletRequest request) {
 
+        if (isEmpty(requestDTO.getApplyDate())) {
+            throw new SPRuntimeError("Kindly provide application submission date", HttpStatus.BAD_REQUEST);
+        }
+
         LocalDateTime applyDate =
                 LocalDate.parse(
                                 requestDTO.getApplyDate(),
@@ -247,11 +263,11 @@ public class ApplicationTrackingService {
             tenantId = (String) responseEntity.getBody();
         }
 
-        List<ApplicationTracking> trackingList =trackingRepository
-                                                .findByApplRefNoAndApplyDateAndTenantIdOrderByProcessIdAsc(
-                                                        requestDTO.getApplRefNo(),
-                                                        applyDate,
-                                                        tenantId);
+        List<ApplicationTracking> trackingList = trackingRepository
+                .findByApplRefNoAndApplyDateAndTenantIdOrderByProcessIdAsc(
+                        requestDTO.getApplRefNo(),
+                        applyDate,
+                        tenantId);
 
         if (trackingList.isEmpty()) {
 
@@ -275,4 +291,121 @@ public class ApplicationTrackingService {
     public DocumentDownloadResponse getDocument(Long documentId, UserSessionDTO user) {
         return applicationTrackingRepositoryCustom.getDocument(documentId, user);
     }
+
+    public ApplicationTrackingResponse commonTrack(ApplicationTrackingRequest requestDTO, HttpServletRequest request) {
+
+        UserSessionDTO user = getUserSessionDetails(request);
+
+        if (isNull(user) || isNull(user.getUserID()) || user.getUserID() == 0) {
+            return trackPublicApplication(new PublicApplicationTrackingRequest(requestDTO.getApplRefNo(), requestDTO.getApplyDate()), request);
+        }
+
+        return getTracking(requestDTO, request);
+    }
+
+    public ServerSidePaginationRecord<ApplicationApplicantTrackingResponse.ApplicantApplicationDTO> getApplicantApplications(ApplicationTrackingFilter filter, UserSessionDTO user) {
+
+        int page = filter != null && filter.getPage() != null ? Math.max(filter.getPage(), 0) : 0;
+
+        int size = filter != null && filter.getSize() != null ? Math.max(filter.getSize(), 1) : 25;
+
+        Pageable pageable = PageRequest.of(
+                page,
+                size,
+                Sort.by(Sort.Direction.DESC, "createdOn")
+        );
+
+        String tenantId = user.getTenantId();
+        Long userId = user.getUserID();
+
+
+        Specification<ApplicantInbox> specification = ApplicantInboxSpecification.applicantApplications(userId, tenantId, filter);
+
+        Page<ApplicantInbox> inboxPage = applicantInboxRepository.findAll(specification, pageable);
+
+        List<ApplicationApplicantTrackingResponse.ApplicantApplicationDTO>
+                applications =
+                inboxPage.getContent()
+                        .stream()
+                        .map(this::buildApplicantApplication)
+                        .toList();
+
+
+        ServerSidePaginationRecord<ApplicationApplicantTrackingResponse.ApplicantApplicationDTO> pagination = new ServerSidePaginationRecord<>();
+
+
+        pagination.setData(applications);
+        pagination.setTotalRecords(inboxPage.getTotalElements());
+        pagination.setCurrentPage(inboxPage.getNumber());
+        pagination.setPageSize(inboxPage.getSize());
+        pagination.setTotalPages(inboxPage.getTotalPages());
+
+
+        return pagination;
+    }
+
+    private ApplicationApplicantTrackingResponse.ApplicantApplicationDTO buildApplicantApplication(ApplicantInbox inbox) {
+
+        ApplicationApplicantTrackingResponse.ApplicantApplicationDTO dto = new ApplicationApplicantTrackingResponse.ApplicantApplicationDTO();
+
+
+        dto.setApplId(inbox.getApplicationId());
+        dto.setTaskName(inbox.getTaskName());
+        dto.setPendingApplicantAction(Boolean.TRUE);
+        dto.setInboxAction(buildInboxAction(inbox));
+        dto.setApplRefNo(inbox.getApplicationRefNo());
+        dto.setServiceId(inbox.getServiceId());
+        dto.setServiceName(inbox.getServiceName());
+        dto.setBeneficiaryName(inbox.getBeneficiaryName());
+        dto.setReceivedDate(inbox.getApplyDate());
+        dto.setTaskId(inbox.getTaskId());
+        dto.setFormId(inbox.getFormId());
+
+        return dto;
+    }
+
+
+    private ApplicationApplicantTrackingResponse.InboxActionDTO buildInboxAction(ApplicantInbox inbox) {
+
+        ApplicationApplicantTrackingResponse.InboxActionDTO dto = new ApplicationApplicantTrackingResponse.InboxActionDTO();
+
+        dto.setRequiresPayment(inbox.isRequiresPayment());
+        dto.setRequiresForm(inbox.isRequiresForm());
+
+
+        return dto;
+    }
+
+//    private String resolveActionUrl(ApplicationTracking tracking, Long sessionUserId, boolean officialAccess, boolean applicantAccess,String tenantId) {
+//
+//        if (applicantAccess) {
+//            Optional<ApplicantInbox> applicantInbox = applicantInboxRepository
+//                                                                .findByApplicationIdAndCurrentProcessIdAndTenantId(tracking.getApplId(), tracking.getProcessId(),tenantId);
+//
+//            if (applicantInbox.isPresent()) {
+//
+//                return inboxActionUrlService.getOrCreateUrl(
+//                        ActionUrlTargetType.APPLICANT_INBOX,
+//                        String.valueOf(applicantInbox.get().getId()), tracking.getApplId(), applicantInbox.get().getTenantId()
+//                );
+//            }
+//        }
+//
+//
+//        if (officialAccess) {
+//
+//            Optional<UserInbox> userInbox = userInboxRepository
+//                    .findActiveByApplicationIdAndCurrentProcessId(tracking.getApplId(), tracking.getProcessId());
+//
+//            if (userInbox.isPresent()) {
+//                return inboxActionUrlService.getOrCreateUrl(
+//                        ActionUrlTargetType.USER_INBOX,
+//                        String.valueOf(userInbox.get().getId()), tracking.getApplId(), userInbox.get().getTenantId());
+//            }
+//        }
+//
+//        return null;
+//    }
+
+
 }

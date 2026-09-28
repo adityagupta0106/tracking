@@ -1,7 +1,10 @@
 package com.serviceplus.tracking.repository;
 
 import com.serviceplus.tracking.entity.ApplicationTracking;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
@@ -11,7 +14,8 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface ApplicationTrackingRepository extends JpaRepository<ApplicationTracking, String> {
+public interface ApplicationTrackingRepository extends JpaRepository<ApplicationTracking, String> ,
+        JpaSpecificationExecutor<ApplicationTracking> {
 
     Optional<ApplicationTracking> findByProcessIdAndTenantId(String processId, String tenantId);
 
@@ -36,4 +40,8 @@ public interface ApplicationTrackingRepository extends JpaRepository<Application
     List<ApplicationTracking> findByApplIdAndTenantIdOrderByProcessIdAsc(String applId, String tenantId);
 
     List<ApplicationTracking> findByApplRefNoAndTenantIdOrderByProcessIdAsc(String applRefNo, String tenantId);
+
+    List<ApplicationTracking> findByAppliedUserIdAndTenantId(Long userId, String tenantId);
+
+    Page<ApplicationTracking> findByAppliedUserIdAndTenantIdOrderByApplyDateDesc(Long userId, String tenantId, Pageable pageable);
 }

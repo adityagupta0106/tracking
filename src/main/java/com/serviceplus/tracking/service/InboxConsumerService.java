@@ -5,10 +5,9 @@ import static com.serviceplus.tracking.utility.CommonUtil.isEmpty;
 import static java.util.Objects.isNull;
 
 import java.sql.Timestamp;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import com.serviceplus.tracking.dto.*;
@@ -38,6 +37,8 @@ import com.serviceplus.tracking.repository.TaskMasterRepository;
 import com.serviceplus.tracking.repository.UserInboxRepository;
 import com.serviceplus.tracking.repository.UserSentBoxRepository;
 
+import static com.serviceplus.tracking.utility.ApplicationConstants.ACTION_CALLBACK;
+
 @Service
 public class InboxConsumerService {
 
@@ -56,13 +57,16 @@ public class InboxConsumerService {
 
     private final ApplicationTrackingDocumentRepository applicationTrackingDocumentRepository;
 
-    public InboxConsumerService(UserInboxRepository userInboxRepository, UserSentBoxRepository userSentBoxRepository, ApplicationTrackingRepository applicationTrackingRepository, WorkflowInboxRedisService workflowInboxRedisService, ApplicationTrackingHolderRepository trackingHolderRepository, ApplicationTrackingDocumentRepository applicationTrackingDocumentRepository) {
+    private final ApplicantInboxRepository applicantInboxRepository;
+
+    public InboxConsumerService(UserInboxRepository userInboxRepository, UserSentBoxRepository userSentBoxRepository, ApplicationTrackingRepository applicationTrackingRepository, WorkflowInboxRedisService workflowInboxRedisService, ApplicationTrackingHolderRepository trackingHolderRepository, ApplicationTrackingDocumentRepository applicationTrackingDocumentRepository, ApplicantInboxRepository applicantInboxRepository) {
         this.userInboxRepository = userInboxRepository;
         this.userSentBoxRepository = userSentBoxRepository;
         this.applicationTrackingRepository = applicationTrackingRepository;
         this.workflowInboxRedisService = workflowInboxRedisService;
         this.trackingHolderRepository = trackingHolderRepository;
         this.applicationTrackingDocumentRepository = applicationTrackingDocumentRepository;
+        this.applicantInboxRepository = applicantInboxRepository;
     }
 
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule()).configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -78,6 +82,7 @@ public class InboxConsumerService {
             processApplicationTracking(kafkaDTO);
             processSentBox(kafkaDTO);
             processInbox(kafkaDTO);
+            processApplicantInbox(kafkaDTO);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -100,10 +105,59 @@ public class InboxConsumerService {
         if (kafkaDTO == null || kafkaDTO.getProcessList() == null) {
             return;
         }
+        //-------------------------
+        if (kafkaDTO.getCallbackSourceProcessId() != null
+                && !kafkaDTO.getCallbackSourceProcessId().isBlank()) {
+
+            String tenantId =
+                    kafkaDTO.getProcessList()
+                            .stream()
+                            .filter(Objects::nonNull)
+                            .map(ApplicationCurrentProcess::getTenantId)
+                            .filter(Objects::nonNull)
+                            .findFirst()
+                            .orElse(null);
+
+            if (tenantId != null) {
+
+                int updatedRows =
+                        userSentBoxRepository.markAsCalledBack(
+                                kafkaDTO.getCallbackSourceProcessId(),
+                                tenantId
+                        );
+
+                System.out.println(
+                        "CALLBACK SOURCE SENTBOX UPDATED = "
+                                + updatedRows
+                );
+            }
+        }
+      //-------------------------
 
         List<UserSentBox> sentList = new ArrayList<>();
 
         for (ApplicationCurrentProcess process : kafkaDTO.getProcessList()) {
+        	
+        	
+        	if (process == null) {
+        		continue;
+        	}
+        	
+        	if (ACTION_CALLBACK.equals(process.getActionCode())) {
+
+        	    System.out.println("===== CALLBACK DEBUG =====");
+        	    System.out.println("P200 processId       = " + process.getProcessId());
+        	    System.out.println("P100 previousProcess = " + process.getPreviousProcessId());
+        	    System.out.println("tenantId             = " + process.getTenantId());
+        	    System.out.println("actionCode           = " + process.getActionCode());
+
+        	    userInboxRepository.deleteByCurrentProcessIdAndTenantId(process.getProcessId(),process.getTenantId());
+
+        	    
+        	    System.out.println("==========================");
+
+        	    continue;
+        	}
 
             if ("N".equals(process.getActionTaken()) || isEmpty(process.getPreviousProcessId()) || process.getGateway()) {
                 continue;
@@ -401,7 +455,16 @@ public class InboxConsumerService {
 
             tracking.setActionCode(process.getActionCode());
             tracking.setActionTaken(process.getActionTaken());
-            tracking.setActionName(process.getActionName());
+            
+            if (ACTION_CALLBACK.equals(process.getActionCode())) {
+
+                tracking.setActionName("Callbacked");
+
+            } else {
+
+                tracking.setActionName(process.getActionName());
+            }
+            
 
             tracking.setBeneficiaryUserName(kafkaDTO.getBeneficiaryName());
 
@@ -416,7 +479,9 @@ public class InboxConsumerService {
             } else {
                 tracking.setAppliedUserId(null);
             }
-            tracking.setFormId(process.getFormId());
+            if (process.getFormId() != null) {
+                tracking.setFormId(process.getFormId());
+            }
             tracking.setDataId(process.getDataId());
 
             trackingList.add(tracking);
@@ -500,6 +565,148 @@ public class InboxConsumerService {
             log.info("Saving {} application tracking holder mappings", holderList.size());
 
             trackingHolderRepository.saveAll(holderList);
+        }
+    }
+
+    private void processApplicantInbox(UserInboxKafkaDTO kafkaDTO) {
+
+        log.info("Checking applicant inbox");
+
+        if (kafkaDTO == null) {
+            return;
+        }
+
+        if (kafkaDTO.getProcessList() == null || kafkaDTO.getProcessList().isEmpty()) {
+
+            log.warn("Applicant inbox processing received without process list. applicationRefNo={}", kafkaDTO.getApplicationRefNo());
+            return;
+        }
+
+        deleteCompletedApplicantInboxEntries(kafkaDTO);
+
+        if (kafkaDTO.getApplicantTaskDetails() == null || kafkaDTO.getApplicantTaskDetails().isEmpty()) {
+            return;
+        }
+
+        List<ApplicantInbox> trackingList = new ArrayList<>();
+
+        for (ApplicantTaskDetails applicantDetails : kafkaDTO.getApplicantTaskDetails()) {
+
+            if (applicantDetails == null || applicantDetails.getCurrentProcessId() == null) {
+                continue;
+            }
+
+            ApplicationCurrentProcess process =
+                    kafkaDTO.getProcessList()
+                            .stream()
+                            .filter(Objects::nonNull)
+                            .filter(p ->
+                                    applicantDetails
+                                            .getCurrentProcessId()
+                                            .equals(p.getProcessId())
+                            )
+                            .findFirst()
+                            .orElse(null);
+
+            if (process == null) {
+
+                log.warn("Process not found for applicant task. currentProcessId={}, applicationRefNo={}", applicantDetails.getCurrentProcessId(), kafkaDTO.getApplicationRefNo());
+                continue;
+            }
+
+            if (!process.getApplicantTask()) {
+                continue;
+            }
+
+            Optional<ApplicantInbox> existing = applicantInboxRepository.findByCurrentProcessIdAndTenantId(process.getProcessId(), process.getTenantId());
+
+            ApplicantInbox tracking = existing.orElse(new ApplicantInbox());
+
+            boolean isNew = existing.isEmpty();
+
+            populateApplicantTaskTracking(tracking, kafkaDTO, process, applicantDetails);
+
+            if (isNew) {
+                tracking.setCreatedOn(LocalDateTime.now());
+            }
+
+            tracking.setModifiedOn(LocalDateTime.now());
+            trackingList.add(tracking);
+        }
+
+        if (!trackingList.isEmpty()) {
+
+            applicantInboxRepository.saveAll(trackingList);
+            log.info("Saved {} applicant inbox records for applicationRefNo={}", trackingList.size(), kafkaDTO.getApplicationRefNo());
+        }
+    }
+
+    private void deleteCompletedApplicantInboxEntries(UserInboxKafkaDTO kafkaDTO) {
+
+        List<ApplicationCurrentProcess> completedApplicantProcesses =
+                kafkaDTO.getProcessList()
+                        .stream()
+                        .filter(Objects::nonNull)
+                        .filter(process ->
+                                "Y".equals(process.getActionTaken())
+                        )
+                        .filter(process ->
+                                process.getProcessId() != null
+                        )
+                        .toList();
+
+        if (completedApplicantProcesses.isEmpty()) {
+            return;
+        }
+
+        List<ApplicantInbox> recordsToDelete =
+                completedApplicantProcesses
+                        .stream()
+                        .map(process ->
+                                applicantInboxRepository
+                                        .findByCurrentProcessIdAndTenantId(
+                                                process.getProcessId(),
+                                                process.getTenantId()
+                                        )
+                        )
+                        .flatMap(Optional::stream)
+                        .toList();
+
+        if (!recordsToDelete.isEmpty()) {
+
+            applicantInboxRepository.deleteAll(recordsToDelete);
+            log.info("Deleted {} completed applicant inbox records for applicationRefNo={}", recordsToDelete.size(), kafkaDTO.getApplicationRefNo());
+        }
+    }
+
+    private void populateApplicantTaskTracking(ApplicantInbox tracking, UserInboxKafkaDTO kafkaDTO, ApplicationCurrentProcess process, ApplicantTaskDetails applicantDetails) {
+
+
+        tracking.setApplicationId(process.getApplicationId());
+        tracking.setApplicationRefNo(kafkaDTO.getApplicationRefNo());
+        tracking.setAppliedBy(kafkaDTO.getAppliedBy());
+        tracking.setBeneficiaryName(kafkaDTO.getBeneficiaryName());
+        tracking.setApplyDate(kafkaDTO.getApplyDate());
+        tracking.setServiceId(process.getServiceId());
+        tracking.setBaseServiceId(process.getBaseServiceId());
+        tracking.setServiceName(kafkaDTO.getServiceName());
+
+        tracking.setTaskId(process.getCurrentTask());
+        tracking.setTaskName(process.getCurrentTaskName());
+        tracking.setCurrentProcessId(process.getProcessId());
+
+
+        tracking.setFormId(process.getFormId());
+        tracking.setTenantId(process.getTenantId());
+
+        tracking.setSubmissionToSameOfficial(applicantDetails.isSubmissionToSameOfficial());
+
+
+        tracking.setRequiresForm(applicantDetails.isRequiresForm());
+        tracking.setRequiresPayment(applicantDetails.isRequiresPayment());
+
+        if (tracking.getStatus() == null) {
+            tracking.setStatus(process.getActionTaken());
         }
     }
 

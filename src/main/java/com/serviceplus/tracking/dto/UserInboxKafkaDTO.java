@@ -15,7 +15,23 @@ public class UserInboxKafkaDTO {
     private Long loggedInUserId;
     private boolean completeClosure;
 
+
     private List<ApplicationCurrentProcess> processList;
+    private List<ApplicantTaskDetails> applicantTaskDetails;
+    
+    
+    
+    
+    private String callbackSourceProcessId;
+
+    public String getCallbackSourceProcessId() {
+        return callbackSourceProcessId;
+    }
+
+    public void setCallbackSourceProcessId(String callbackSourceProcessId) {
+        this.callbackSourceProcessId = callbackSourceProcessId;}
+    
+    
 
 	public String getServiceName() {
 		return serviceName;
@@ -96,5 +112,13 @@ public class UserInboxKafkaDTO {
 	public void setCompleteClosure(boolean completeClosure) {
 		this.completeClosure = completeClosure;
 	}
-    
+
+    public List<ApplicantTaskDetails> getApplicantTaskDetails() {
+        return applicantTaskDetails;
+    }
+
+    public void setApplicantTaskDetails(List<ApplicantTaskDetails> applicantTaskDetails) {
+        this.applicantTaskDetails = applicantTaskDetails;
+    }
+
 }

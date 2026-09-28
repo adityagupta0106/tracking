@@ -8,4 +8,6 @@ public class ApplicationConstants {
     final public static String CLIENT_DOMAIN_HEADER = "SP-Client-Domain";
     public static final String ATTR_VERSION_KEY = "v";
     public static final String SERVICE_COMPLETION_DATE = "Sys_2";
+    
+    public static final Integer ACTION_CALLBACK = 25;
 }

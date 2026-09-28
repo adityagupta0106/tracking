@@ -10,6 +10,14 @@ public class PublicApplicationTrackingRequest {
 
     private String applyDate;
 
+    public PublicApplicationTrackingRequest() {
+    }
+
+    public PublicApplicationTrackingRequest(String applRefNo, String applyDate) {
+        this.applRefNo = applRefNo;
+        this.applyDate = applyDate;
+    }
+
     public String getApplRefNo() {
         return applRefNo;
     }

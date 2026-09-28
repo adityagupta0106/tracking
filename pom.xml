@@ -11,7 +11,7 @@
 	<groupId>com.serviceplus.tracking</groupId>
 	<artifactId>TrackingService</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<packaging>war</packaging>
+	<packaging>jar</packaging>
 	<name>TrackingService</name>
 	<description>Serviceplus Tracking project for Spring Boot</description>
 	<url/>

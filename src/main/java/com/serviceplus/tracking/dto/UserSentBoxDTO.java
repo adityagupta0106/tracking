@@ -17,6 +17,8 @@ public class UserSentBoxDTO {
     private LocalDateTime actionOn;
     
     private List<MatchedOutputAttr> matchedOutputAttrs;
+    
+    private String currentProcessId;
 
     public List<MatchedOutputAttr> getMatchedOutputAttrs() {
         return matchedOutputAttrs;
@@ -81,4 +83,12 @@ public class UserSentBoxDTO {
     public void setActionOn(LocalDateTime actionOn) {
         this.actionOn = actionOn;
     }
+
+	public String getCurrentProcessId() {
+		return currentProcessId;
+	}
+
+	public void setCurrentProcessId(String currentProcessId) {
+		this.currentProcessId = currentProcessId;
+	}
 }

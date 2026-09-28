@@ -6,6 +6,8 @@ public class ApplicationTrackingRequest {
 
     private String applRefNo;
 
+    private String applyDate;
+
     public String getApplId() {
         return applId;
     }
@@ -20,5 +22,13 @@ public class ApplicationTrackingRequest {
 
     public void setApplRefNo(String applRefNo) {
         this.applRefNo = applRefNo;
+    }
+
+    public String getApplyDate() {
+        return applyDate;
+    }
+
+    public void setApplyDate(String applyDate) {
+        this.applyDate = applyDate;
     }
 }

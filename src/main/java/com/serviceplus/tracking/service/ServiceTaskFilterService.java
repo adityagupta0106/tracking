@@ -1,6 +1,7 @@
 package com.serviceplus.tracking.service;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,6 +18,7 @@ import com.serviceplus.tracking.dto.FormAttributeRequest;
 import com.serviceplus.tracking.entity.InboxSentBoxFilterConfig;
 import com.serviceplus.tracking.feignClient.FormDesignerFeignClient;
 import com.serviceplus.tracking.repository.InboxSentBoxFilterConfigRepository;
+import com.serviceplus.tracking.utility.ApplicationConstants;
 
 @Service
 public class ServiceTaskFilterService {
@@ -83,9 +85,35 @@ public class ServiceTaskFilterService {
 			String fullAttrId = config.getAttrId();
 
 			if (fullAttrId != null && fullAttrId.startsWith("Sys_")) {
-				AttributeDataResponseDTO dto = new AttributeDataResponseDTO();
-				dto.setAttrId(fullAttrId);
-				sysAttributeData.add(dto);
+
+			    AttributeDataResponseDTO dto = new AttributeDataResponseDTO();
+
+			    dto.setAttrId(fullAttrId);
+
+			    if (ApplicationConstants.SERVICE_COMPLETION_DATE.equals(fullAttrId)) {
+
+			        Map<String, Object> attributes = new HashMap<>();
+			        attributes.put("type", "date");
+
+			        Map<String, Object> htmlTag = new HashMap<>();
+			        htmlTag.put("tag", "input");
+			        htmlTag.put("selfClose", true);
+			        htmlTag.put("attributes", attributes);
+
+			        Map<String, Object> label = new HashMap<>();
+			        label.put("value", "Service Completion Date");
+
+			        Map<String, Object> displaySettings = new HashMap<>();
+			        displaySettings.put("label", label);
+
+			        Map<String, Object> attrData = new HashMap<>();
+			        attrData.put("htmlTag", htmlTag);
+			        attrData.put("displaySettings", displaySettings);
+
+			        dto.setAttrData(attrData);
+			    }
+
+			    sysAttributeData.add(dto);
 			}
 		}
 		return sysAttributeData;

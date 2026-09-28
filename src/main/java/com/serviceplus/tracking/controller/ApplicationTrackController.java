@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 import static com.serviceplus.tracking.utility.CommonUtil.getUserSessionDetails;
+import static java.util.Objects.requireNonNull;
 
 @RestController
 @RequestMapping("/a")
@@ -46,6 +47,13 @@ public class ApplicationTrackController {
         UserSessionDTO user = getUserSessionDetails(request);
         return  applicationTrackingService.getDocument(documentId, user);
 
+    }
+
+    @PostMapping("/appl/applicant/inbox")
+    public ServerSidePaginationRecord<?> getApplications(@RequestBody ApplicationTrackingFilter filter, HttpServletRequest request) {
+
+        UserSessionDTO user = requireNonNull(getUserSessionDetails(request));
+        return applicationTrackingService.getApplicantApplications(filter, user);
     }
 
 }
